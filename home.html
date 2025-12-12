@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>逃避集點手帳 v8.0 - 行為追蹤版</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* --- v8.0 風格定義 (維持 v6/v7 馬卡龍系) --- */
+        :root {
+            --bg-color: #fff9f5; --card-bg: #ffffff;
+            --primary-color: #c4a3bf; --accent-color: #ffb7c5;
+            --success-color: #a8e6cf; --text-color: #7a6b75;
+            --sidebar-bg: #fffdf9; --modal-bg: rgba(196, 163, 191, 0.5);
+            --washi-pattern: repeating-linear-gradient(45deg, #f0e0ea, #f0e0ea 10px, #e8d0e0 10px, #e8d0e0 20px);
+            --ai-bg: linear-gradient(135deg, #fff0f5 0%, #fff9fc 100%);
+            --distraction-color: #b39ddb; /* 新增：分心行為的代表色 (淺紫) */
+        }
+
+        body {
+            font-family: 'Segoe UI', 'Microsoft JhengHei', sans-serif;
+            background-color: var(--bg-color); color: var(--text-color);
+            margin: 0; padding: 20px; height: 100vh; box-sizing: border-box; overflow: hidden;
+            background-image: radial-gradient(#f3e6ef 1px, transparent 1px); background-size: 20px 20px;
+        }
+
+        .app-container { display: flex; gap: 25px; max-width: 1200px; margin: 0 auto; height: 100%; }
+
+        /* 左側 */
+        .main-section { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow-y: auto; min-width: 320px; }
+        .header-group { text-align: center; margin-bottom: 25px; position: relative; }
+        .header-stickers { font-size: 1.5rem; position: absolute; top: -10px; width: 100%; display: flex; justify-content: space-between; pointer-events: none; opacity: 0.8; }
+        h1 { font-size: 1.8rem; margin: 5px 0; color: var(--primary-color); text-shadow: 2px 2px 0px #fff, 3px 3px 0px #ecdce8; font-weight: 800; letter-spacing: 1px; }
+        .subtitle-note { display: inline-block; background: #fff0f5; color: #9c8a9c; padding: 5px 15px; border-radius: 4px; font-size: 0.9rem; box-shadow: 2px 2px 5px rgba(196, 163, 191, 0.2); transform: rotate(-2deg); border: 1px dashed var(--primary-color); }
+        .card-counter-badge { background: var(--primary-color); color: #fff; padding: 4px 12px; border-radius: 12px; font-size: 0.8rem; margin-bottom: 8px; display: inline-block; box-shadow: 2px 2px 0px var(--accent-color);}
+
+        /* 卡片 */
+        .card-container { position: relative; width: 100%; max-width: 380px; padding: 10px; }
+        .card-container::before, .card-container::after { content: ''; position: absolute; left: 5%; width: 90%; height: 25px; background: var(--washi-pattern); box-shadow: 0 2px 5px rgba(0,0,0,0.05); z-index: 2; }
+        .card-container::before { top: -8px; transform: rotate(-1.5deg); clip-path: polygon(2% 0, 98% 0, 100% 100%, 0% 100%); }
+        .card-container::after { bottom: -8px; transform: rotate(1deg); clip-path: polygon(0 0, 100% 0, 98% 100%, 2% 100%); }
+        .card { background: var(--card-bg); width: 100%; border-radius: 20px; box-shadow: 0 8px 25px rgba(196, 163, 191, 0.15); padding: 30px 25px; box-sizing: border-box; position: relative; z-index: 1; }
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 10px; }
+        .slot { aspect-ratio: 1; border: 3px dotted #e8d0e0; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #fff9fc; transition: all 0.3s; }
+        .slot:hover { border-color: var(--accent-color); background: #fff0f5; }
+        .stamp { font-size: 2rem; filter: drop-shadow(2px 2px 0px rgba(0,0,0,0.1)); animation: stamp-drop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+        @keyframes stamp-drop { 0% { transform: scale(3) rotate(30deg); opacity: 0; } 100% { transform: scale(1) rotate(var(--rotate-deg)); opacity: 1; } }
+        .btn-escape { background-color: var(--accent-color); color: white; border: none; padding: 18px 40px; border-radius: 50px; font-size: 1.2rem; font-weight: bold; cursor: pointer; margin-top: 40px; box-shadow: 0 6px 0px #ff9eb0, 0 10px 20px rgba(255, 183, 197, 0.4); width: 85%; max-width: 320px; transition: all 0.1s; text-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
+        .btn-escape:active { transform: translateY(4px); box-shadow: 0 2px 0px #ff9eb0, 0 5px 10px rgba(255, 183, 197, 0.4); }
+
+        /* 右側 */
+        .sidebar-section { flex: 1.3; background: var(--sidebar-bg); border-radius: 25px; padding: 25px; box-shadow: 0 5px 20px rgba(196, 163, 191, 0.1); overflow-y: auto; border: 3px solid #f0e0ea; display: flex; flex-direction: column; max-width: 550px; }
+        h3 { color: var(--primary-color); border-bottom: 3px dotted #e8d0e0; padding-bottom: 10px; margin-top: 25px; margin-bottom: 15px; font-weight: 700;}
+        h3::before { content: '✨'; margin-right: 5px; }
+        h3:first-child { margin-top: 0; }
+        
+        /* AI 洞察卡片 */
+        .ai-card {
+            background: var(--ai-bg); border: 2px solid #e8d0e0; border-radius: 15px; padding: 15px; margin-bottom: 20px;
+            box-shadow: 0 4px 10px rgba(196, 163, 191, 0.15); position: relative; overflow: hidden;
+            flex-shrink: 0; min-height: 80px; padding-top: 35px;
+        }
+        .ai-card::before { content: '🤖 AI 模式洞察'; position: absolute; top: 0; left: 0; background: #c4a3bf; color: white; font-size: 0.7rem; padding: 3px 8px; border-bottom-right-radius: 10px; }
+        .ai-insight-text { font-size: 0.95rem; color: #7a6b75; line-height: 1.6; margin-top: 10px; }
+        .ai-highlight { color: #e66a6a; font-weight: bold; background: #fff0f5; padding: 0 4px; border-radius: 4px; }
+
+        /* 統計概況 */
+        .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; flex-shrink: 0; }
+        .summary-card { background: #fff; border: 2px solid #f0e0ea; border-radius: 15px; padding: 15px; text-align: center; box-shadow: 3px 3px 0px #faf0f5; flex-shrink: 0; }
+        .summary-num { font-size: 1.5rem; font-weight: 800; color: var(--accent-color); }
+        .return-rate-high { color: var(--success-color); }
+        .summary-label { font-size: 0.85rem; color: #a890a8; margin-top: 5px; font-weight: bold;}
+        
+        /* 圖表卡片 */
+        .chart-card { background: #fff; border: 2px solid #f0e0ea; border-radius: 15px; padding: 10px 10px 20px; margin-bottom: 15px; box-shadow: 3px 3px 0px #faf0f5; transition: transform 0.2s; flex-shrink: 0; }
+        .chart-card:hover { transform: translateY(-2px); border-color: var(--accent-color); cursor: pointer; }
+        .chart-title { font-size: 0.9rem; font-weight: bold; color: #c4a3bf; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+        .chart-hint { font-size: 0.75rem; color: #ccc; margin-left: auto; font-weight: normal; }
+        .chart-card canvas { width: 100%; max-height: 200px; }
+
+        /* 篩選標籤 */
+        .filter-badge {
+            background: #7a6b75; color: white; padding: 5px 12px; border-radius: 20px; font-size: 0.85rem;
+            display: inline-flex; align-items: center; gap: 8px; margin-bottom: 15px; animation: popIn 0.3s;
+        }
+        .filter-close { cursor: pointer; font-weight: bold; }
+        @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        /* 日誌 */
+        details { margin-bottom: 10px; border: 2px solid #f0e0ea; border-radius: 12px; background: white; overflow: hidden; box-shadow: 3px 3px 0px #faf0f5;}
+        summary { padding: 12px 15px; cursor: pointer; background: #fff9fc; font-weight: bold; font-size: 0.9rem; display: flex; justify-content: space-between; color: var(--primary-color); }
+        .log-item { padding: 12px 15px; border-top: 2px dashed #f8edf5; font-size: 0.85rem; color: #7a6b75; display: flex; align-items: center; gap: 10px; position: relative; background: #fff; }
+        .log-meta { display: flex; flex-direction: column; flex: 1; }
+        .log-badges { display: flex; gap: 5px; margin-bottom: 5px; flex-wrap: wrap; }
+        .badge { padding: 3px 8px; border-radius: 10px; font-size: 0.75rem; color: white; font-weight: bold; box-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
+        .bg-task { background: #a8d8ea; } .bg-reason { background: #ffb7c5; } 
+        .bg-distraction { background: var(--distraction-color); } /* 分心行為標籤色 */
+        .intensity-dots { color: var(--accent-color); letter-spacing: -1px; font-size: 0.9rem; }
+        .return-status { font-size: 1.3rem; cursor: help; filter: drop-shadow(1px 1px 0px rgba(0,0,0,0.1)); }
+        .status-ok { color: var(--success-color); } .status-no { color: #e0e0e0; }
+        .btn-delete-row { background: #fff0f5; border: 1px solid #e8d0e0; color: var(--primary-color); border-radius: 50%; width: 25px; height: 25px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; cursor: pointer; opacity: 0.5; transition: all 0.2s; }
+        .btn-delete-row:hover { opacity: 1; transform: scale(1.1) rotate(10deg); background: var(--accent-color); color: white; border-color: var(--accent-color);}
+
+        @media (max-width: 800px) { .app-container { flex-direction: column; height: auto; } body { overflow-y: auto; height: auto; } .sidebar-section { max-width: 100%; height: auto; } }
+
+        /* Modal & Inputs */
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--modal-bg); display: flex; justify-content: center; align-items: center; z-index: 2000; opacity: 0; pointer-events: none; transition: opacity 0.3s; backdrop-filter: blur(5px); }
+        .modal-overlay.active { opacity: 1; pointer-events: auto; }
+        .modal-content { background: #fffafc; padding: 30px; border-radius: 25px; width: 90%; max-width: 400px; text-align: center; box-shadow: 0 15px 40px rgba(196, 163, 191, 0.3); border: 3px solid #f0e0ea; position: relative; max-height: 85vh; overflow-y: auto; }
+        .modal-content::before { content: ''; position: absolute; top: -10px; left: 50%; transform: translateX(-50%); width: 60px; height: 20px; background: var(--washi-pattern); border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        
+        .input-group { margin-bottom: 20px; text-align: left; }
+        .input-label { font-size: 0.95rem; color: var(--primary-color); margin-bottom: 10px; display: block; font-weight: bold; }
+        .chip-group { display: flex; flex-wrap: wrap; gap: 10px; }
+        
+        /* 選項按鈕通用樣式 */
+        .chip-btn { border: 2px solid #f0e0ea; background: white; padding: 8px 15px; border-radius: 20px; font-size: 0.9rem; color: var(--text-color); cursor: pointer; transition: 0.2s; font-weight: bold; box-shadow: 2px 2px 0px #f0e0ea; }
+        .chip-btn:hover { transform: translateY(-2px); }
+        /* 單選選中 */
+        .chip-btn.selected { background: var(--accent-color); color: white; border-color: var(--accent-color); box-shadow: 2px 2px 0px #ff9eb0; }
+        /* 複選選中 (Distractions) */
+        .chip-btn.checked { background: var(--distraction-color); color: white; border-color: var(--distraction-color); box-shadow: 2px 2px 0px #9575cd; }
+
+        .chip-add-btn { border: 2px dashed #c4a3bf; background: transparent; color: #c4a3bf; padding: 8px 12px; border-radius: 20px; font-size: 1rem; cursor: pointer; transition: 0.2s; font-weight: bold; }
+        .chip-add-btn:hover { background: #fff0f5; border-color: var(--accent-color); color: var(--accent-color); }
+        #customInput { border: 2px solid #f0e0ea; border-radius: 15px; padding: 12px; width: 100%; box-sizing: border-box; background: #fff9fc; color: var(--text-color); outline: none; transition: 0.3s; }
+        .slider-container { display: flex; align-items: center; gap: 15px; background: #fff9fc; padding: 10px; border-radius: 20px; border: 2px solid #f0e0ea; }
+        input[type=range] { flex: 1; accent-color: var(--accent-color); cursor: pointer; }
+        .intensity-val { font-weight: 800; color: var(--accent-color); font-size: 1.2rem; }
+        .timer-display { font-size: 4rem; font-weight: 800; color: var(--accent-color); font-family: 'Segoe UI', monospace; margin: 20px 0; text-shadow: 3px 3px 0px #f0e0ea; }
+        
+        .btn-main { padding: 12px; background: var(--accent-color); color: white; border: none; border-radius: 15px; cursor: pointer; font-weight: bold; font-size: 1rem; box-shadow: 0 4px 0px #ff9eb0; transition: 0.1s; width: 100%; margin-top: 10px;}
+        .btn-main:active { transform: translateY(4px); box-shadow: none; }
+        .btn-sub { background: #f0e0ea; color: #a890a8; border: none; padding: 12px; border-radius: 15px; cursor: pointer; font-weight: bold; width: 100%; }
+
+        /* Report Modal Styles */
+        .report-section { text-align: left; margin-bottom: 20px; border-bottom: 1px dashed #eee; padding-bottom: 15px; }
+        .report-stat { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.95rem; color: #666; }
+        .report-highlight { color: var(--accent-color); font-weight: bold; }
+        .report-advice { background: #fff9fc; padding: 15px; border-radius: 10px; border: 1px solid #f0e0ea; color: #7a6b75; line-height: 1.6; text-align: left; font-size: 0.95rem; }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <div class="main-section">
+            <div class="header-group">
+                <div class="header-stickers"><span>✨</span><span>🎀</span></div>
+                <div class="card-counter-badge">CARD #<span id="cardNum">1</span></div>
+                <h1>🐢 逃避集點手帳</h1>
+                <div class="subtitle-note">接納當下，休息後再出發也沒關係喔。</div>
+            </div>
+            <div class="card-container">
+                <div class="card">
+                    <div class="grid" id="stampGrid"></div>
+                </div>
+            </div>
+            <button class="btn-escape" onclick="openInputModal()">💥 想要逃避一下！</button>
+        </div>
+
+        <div class="sidebar-section">
+            
+            <div class="ai-card" id="aiInsightBox">
+                <div style="font-weight:bold; color:var(--primary-color);">✨ AI 模式偵測中...</div>
+                <div class="ai-insight-text">累積更多數據後，我會告訴你關於你逃避的小秘密喔！</div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h3>📊 數據儀表板</h3>
+                <button onclick="openReportModal()" style="background:var(--primary-color); color:white; border:none; border-radius:20px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-weight:bold;">📊 生成週報</button>
+            </div>
+
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <div class="summary-num" id="statReturnRate">--%</div>
+                    <div class="summary-label">修復回歸率</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-num" id="statAvgIntensity">--</div>
+                    <div class="summary-label">平均情緒強度</div>
+                </div>
+            </div>
+
+            <div class="chart-card">
+                <div class="chart-title">
+                    <span class="icon">🥇</span><span>任務 × 原因 (點擊篩選)</span>
+                    <span class="chart-hint">👆 點擊長條</span>
+                </div>
+                <canvas id="taskReasonChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <div class="chart-title">
+                    <span class="icon">🎮</span><span>逃避行為排行 (分心做什麼)</span>
+                </div>
+                <canvas id="distractionChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <div class="chart-title">
+                    <span class="icon">🥈</span><span>每日趨勢 (點擊篩選)</span>
+                    <span class="chart-hint">👆 點擊日期</span>
+                </div>
+                <canvas id="dailyTrendChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <div class="chart-title">
+                    <span class="icon">🥉</span><span>強度分布 (點擊篩選)</span>
+                    <span class="chart-hint">👆 點擊強度</span>
+                </div>
+                <canvas id="intensityChart"></canvas>
+            </div>
+
+            <h3>📅 逃避日誌</h3>
+            <div id="activeFilter" style="display:none;" class="filter-badge">
+                <span id="filterText">篩選中...</span>
+                <span class="filter-close" onclick="clearFilter()">✕</span>
+            </div>
+            <div id="logContainer" style="padding-bottom: 20px;"></div>
+            
+            <div style="display:flex; gap:10px; margin-top:auto;">
+                <button onclick="resetAllData()" style="flex:1; background:none; border:2px dashed #f0e0ea; color:#c4a3bf; padding: 10px; border-radius: 15px; font-weight:bold; cursor:pointer; transition:0.2s;">🗑️ 重置</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="inputModal">
+        <div class="modal-content">
+            <h3 style="margin:0 0 20px 0; color: var(--primary-color);">📝 紀錄當下狀態</h3>
+            <div class="input-group">
+                <span class="input-label">你在逃避什麼？</span>
+                <div class="chip-group" id="taskChips"></div>
+            </div>
+            <div class="input-group">
+                <span class="input-label">為什麼想逃？</span>
+                <div class="chip-group" id="reasonChips"></div>
+                <input type="text" id="customInput" placeholder="或是單次輸入其他原因..." style="margin-top:12px;">
+            </div>
+            <div class="input-group">
+                <span class="input-label">想逃的強度 (1-5)</span>
+                <div class="slider-container">
+                    <span style="font-size:1.2rem">😌</span>
+                    <input type="range" id="intensityRange" min="1" max="5" value="3" oninput="document.getElementById('intensityVal').innerText = this.value">
+                    <span class="intensity-val" id="intensityVal">3</span>
+                    <span style="font-size:1.2rem">🥵</span>
+                </div>
+            </div>
+            <div style="display:flex; gap:15px; margin-top:25px;">
+                <button onclick="closeModal('inputModal')" class="btn-sub">取消</button>
+                <button onclick="confirmStamp()" class="btn-main" style="margin-top:0;">蓋章並休息</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="returnModal">
+        <div class="modal-content">
+            <h3 style="margin-top:0;">👋 歡迎回來</h3>
+            <p style="color:#7a6b75; margin-bottom:15px; line-height:1.6; font-weight: bold;">距離上次逃避 (<span id="lastTimeStr" style="color:var(--accent-color);">--:--</span>) 已經過了一段時間囉。</p>
+            
+            <div class="input-group" style="text-align: center;">
+                <span class="input-label" style="text-align: center; color:#b39ddb;">👀 剛才偷偷去做了什麼？(可複選)</span>
+                <div class="chip-group" id="distractionChips" style="justify-content: center;"></div>
+            </div>
+
+            <p style="color:#7a6b75; font-size:0.9rem;">後來有回去處理那件任務嗎？</p>
+            <div style="display:flex; gap:15px; margin-top:15px;">
+                <button class="btn-sub" onclick="handleReturn(false)">⭕ 沒有耶</button>
+                <button class="btn-main" onclick="handleReturn(true)" style="margin-top:0; background:var(--success-color); box-shadow:0 4px 0 #8fdcb9;">✅ 有喔！</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="timerModal">
+        <div class="modal-content">
+            <h3>🌳 暫停一下</h3>
+            <p style="color:#7a6b75; font-weight:bold;">允許自己從高壓中抽離 3 分鐘。</p>
+            <div class="timer-display" id="timerDisplay">03:00</div>
+            <button onclick="stopTimer()" class="btn-sub" style="border:2px solid #e8d0e0; background:transparent;">我準備好了 (跳過)</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="reportModal">
+        <div class="modal-content">
+            <h3 style="margin-top:0; color:var(--primary-color);">📅 本週逃避週報</h3>
+            <div id="reportContent" class="report-section"></div>
+            <div class="report-advice" id="reportAdvice"></div>
+            <button onclick="closeModal('reportModal')" class="btn-main">收到！繼續加油</button>
+        </div>
+    </div>
+
+    <script>
+        const MAX_STAMPS = 12;
+        const STAMP_BY_INTENSITY = {
+            1: ['🌸','🌱','🩷','🍡','🐢','😊','🍵','💖','🌷'],
+            2: ['🐱','🐰','🧋','🍮','🍪','🧁','⭐','💗','🍑'],
+            3: ['🍩','🧸','🍦','🎀','🌼','🍓','😌','📒','🌟'],
+            4: ['🔥','🤯','🍫','😵‍💫','🐯','🍬','💥','🎉'],
+            5: ['💢','⚡','😱','🫠','😫','🎇','🌪️','🥵','🧨']
+        };
+        const DEFAULT_TASKS = ['📚看論文', '💻寫Code', '💬回訊息', '🧹做家事', '🌀其他'];
+        const DEFAULT_REASONS = ['😫太累了', '🥱好無聊', '😰很焦慮', '🧱卡關了'];
+        const DEFAULT_DISTRACTIONS = ['🪄玩哈波', '🧵刷Threads', '📺看哈波直播', '⚔️玩FGO', '▶️看YT', '💬刷Discord'];
+
+        let selectedTask = ''; let selectedReason = ''; 
+        let selectedDistractions = []; // 新增：複選的分心項目
+        let countdownInterval;
+        let taskReasonChartInstance = null; let dailyTrendChartInstance = null; let intensityChartInstance = null; let distractionChartInstance = null;
+        let currentFilter = null;
+
+        function init() {
+            checkDataMigration(); renderOptions(); renderAll(); checkPendingReturn();
+        }
+
+        function getData() {
+            const stored = localStorage.getItem('escape_v8_data'); // 升級到 v8
+            return stored ? JSON.parse(stored) : { stamps: [], customTasks: [], customReasons: [], customDistractions: [] };
+        }
+        function saveData(data) { localStorage.setItem('escape_v8_data', JSON.stringify(data)); }
+        
+        function checkDataMigration() {
+            // v7 -> v8
+            if (localStorage.getItem('escape_v7_data') && !localStorage.getItem('escape_v8_data')) {
+                const old = JSON.parse(localStorage.getItem('escape_v7_data'));
+                // 新增 distraction 欄位
+                const newStamps = old.stamps.map(s => ({ ...s, distractions: s.distractions || [] }));
+                saveData({ 
+                    stamps: newStamps, 
+                    customTasks: old.customTasks || [], 
+                    customReasons: old.customReasons || [],
+                    customDistractions: [] 
+                });
+            }
+        }
+        function pickStampByIntensity(intensity) {
+            const pool = STAMP_BY_INTENSITY[intensity] || STAMP_BY_INTENSITY[3];
+            return pool[Math.floor(Math.random() * pool.length)];
+        }
+
+        // --- 渲染選項按鈕 ---
+        function renderOptions() {
+            const data = getData();
+            renderChipGroup('taskChips', [...DEFAULT_TASKS, ...(data.customTasks || [])], 'task');
+            renderChipGroup('reasonChips', [...DEFAULT_REASONS, ...(data.customReasons || [])], 'reason');
+            // 新增：分心行為選項 (複選)
+            renderDistractionOptions();
+        }
+
+        function renderDistractionOptions() {
+            const data = getData();
+            const container = document.getElementById('distractionChips');
+            container.innerHTML = '';
+            const items = [...DEFAULT_DISTRACTIONS, ...(data.customDistractions || [])];
+
+            items.forEach(text => {
+                const btn = document.createElement('button');
+                btn.className = 'chip-btn';
+                btn.textContent = text;
+                // 如果已經選了，加上 checked class
+                if (selectedDistractions.includes(text)) btn.classList.add('checked');
+                
+                btn.onclick = function() { toggleDistraction(this, text); };
+                container.appendChild(btn);
+            });
+
+            const addBtn = document.createElement('button'); addBtn.className = 'chip-add-btn'; addBtn.textContent = '+';
+            addBtn.onclick = function() { addNewOption('distraction'); };
+            container.appendChild(addBtn);
+        }
+
+        function renderChipGroup(containerId, items, type) {
+            const container = document.getElementById(containerId); container.innerHTML = '';
+            items.forEach(text => {
+                const btn = document.createElement('button'); btn.className = 'chip-btn'; btn.textContent = text;
+                btn.onclick = function() { if(type === 'task') selectTask(this, text); else selectReason(this, text); };
+                container.appendChild(btn);
+            });
+            const addBtn = document.createElement('button'); addBtn.className = 'chip-add-btn'; addBtn.textContent = '+';
+            addBtn.onclick = function() { addNewOption(type); }; container.appendChild(addBtn);
+        }
+
+        function addNewOption(type) {
+            let promptText = "";
+            if(type==='task') promptText="新增任務名稱：";
+            else if(type==='reason') promptText="新增原因：";
+            else promptText="新增分心行為：";
+
+            const newOption = prompt(promptText);
+            if (newOption && newOption.trim() !== "") {
+                const data = getData();
+                if (type === 'task') { if (!data.customTasks) data.customTasks = []; data.customTasks.push(newOption.trim()); } 
+                else if (type === 'reason') { if (!data.customReasons) data.customReasons = []; data.customReasons.push(newOption.trim()); }
+                else { if (!data.customDistractions) data.customDistractions = []; data.customDistractions.push(newOption.trim()); }
+                saveData(data); renderOptions();
+            }
+        }
+
+        function renderAll() {
+            const data = getData(); const stamps = data.stamps;
+            // Card Logic
+            const currentCardIndex = Math.floor(stamps.length / MAX_STAMPS);
+            const stampsOnCurrentCard = stamps.length % MAX_STAMPS;
+            const isFullForVisual = (stamps.length > 0 && stampsOnCurrentCard === 0);
+            document.getElementById('cardNum').innerText = isFullForVisual ? currentCardIndex : currentCardIndex + 1;
+            const grid = document.getElementById('stampGrid'); grid.innerHTML = '';
+            const displayCount = isFullForVisual ? MAX_STAMPS : stampsOnCurrentCard;
+            for (let i = 0; i < MAX_STAMPS; i++) {
+                const slot = document.createElement('div'); slot.className = 'slot';
+                if (i < displayCount) {
+                    const idx = currentCardIndex * MAX_STAMPS + i;
+                    if(idx < stamps.length) {
+                        const stampIcon = stamps[idx].stampIcon || '🐢';
+                        const stamp = document.createElement('div'); stamp.className = 'stamp'; stamp.textContent = stampIcon;
+                        const rotateDeg = Math.floor(Math.random()*30)-15;
+                        stamp.style.setProperty('--rotate-deg', `${rotateDeg}deg`);
+                        stamp.style.transform = `scale(1) rotate(${rotateDeg}deg)`;
+                        slot.appendChild(stamp);
+                    }
+                }
+                grid.appendChild(slot);
+            }
+            renderStats(stamps); 
+            renderLog(stamps, currentFilter); 
+            renderCharts(stamps);
+            analyzePatterns(stamps); 
+        }
+
+        // --- 1. AI 模式偵測邏輯 (v8 Update) ---
+        function analyzePatterns(stamps) {
+            const box = document.getElementById('aiInsightBox');
+            if (stamps.length < 5) {
+                box.innerHTML = `<div style="font-weight:bold; color:var(--primary-color);">✨ AI 學習中...</div><div class="ai-insight-text">再累積 ${5 - stamps.length} 筆資料，我就能分析你的逃避模式囉！</div>`;
+                return;
+            }
+
+            const hours = new Array(24).fill(0); stamps.forEach(s => hours[new Date(s.timestamp).getHours()]++);
+            const maxHour = hours.indexOf(Math.max(...hours));
+            const timeInsight = `下午 ${maxHour}:00 - ${maxHour+1}:00`;
+
+            // 分心行為分析
+            const distCounts = {};
+            stamps.forEach(s => {
+                if(s.distractions && s.distractions.length > 0) {
+                    s.distractions.forEach(d => distCounts[d] = (distCounts[d]||0)+1);
+                }
+            });
+            const topDist = Object.keys(distCounts).length > 0 ? Object.keys(distCounts).sort((a,b)=>distCounts[b]-distCounts[a])[0] : null;
+
+            const returned = stamps.filter(s => s.returned === true).length;
+            const returnRate = Math.round((returned / stamps.filter(s=>s.returned!==null).length) * 100) || 0;
+
+            let text = `💡 你的逃避好發期在 <span class="ai-highlight">${timeInsight}</span>。<br>`;
+            if (topDist) text += `💡 你逃避時最常 <span class="ai-highlight" style="background:#f3e5f5; color:#7e57c2;">${topDist}</span>，要注意無意識的沉迷喔！<br>`;
+            else text += `💡 試著記錄逃避時做了什麼，我能給你更多建議。<br>`;
+            
+            if (returnRate > 70) text += `💡 你的回歸率高達 ${returnRate}%，恢復能力很棒！`;
+            else text += `💡 回歸率 ${returnRate}%，加油！回來就是勝利。`;
+
+            box.innerHTML = `<div style="font-weight:bold; color:var(--primary-color);">🤖 AI 模式洞察</div><div class="ai-insight-text">${text}</div>`;
+        }
+
+        // --- 2. 智能週報系統 (v8 Update) ---
+        function openReportModal() {
+            const stamps = getData().stamps;
+            const now = new Date();
+            const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay() + 1)); startOfWeek.setHours(0,0,0,0);
+            const weeklyStamps = stamps.filter(s => new Date(s.timestamp) >= startOfWeek);
+            
+            if (weeklyStamps.length === 0) { alert("本週還沒有紀錄喔！先去蓋幾個章吧。"); return; }
+
+            const total = weeklyStamps.length;
+            const avgIntensity = (weeklyStamps.reduce((a,b)=>a+(parseInt(b.intensity)||3),0)/total).toFixed(1);
+            
+            const reasons = {}; weeklyStamps.forEach(s => reasons[s.reason] = (reasons[s.reason]||0)+1);
+            const topReason = Object.keys(reasons).sort((a,b)=>reasons[b]-reasons[a])[0];
+
+            // 統計分心
+            const dists = {};
+            weeklyStamps.forEach(s => {
+                if(s.distractions) s.distractions.forEach(d => dists[d] = (dists[d]||0)+1);
+            });
+            const topDist = Object.keys(dists).length > 0 ? Object.keys(dists).sort((a,b)=>dists[b]-dists[a])[0] : "無紀錄";
+
+            const content = document.getElementById('reportContent');
+            content.innerHTML = `
+                <div class="report-stat"><span>本週逃避次數</span> <span class="report-highlight">${total} 次</span></div>
+                <div class="report-stat"><span>平均情緒強度</span> <span class="report-highlight">${avgIntensity} / 5</span></div>
+                <div class="report-stat"><span>主要原因</span> <span class="report-highlight">${topReason}</span></div>
+                <div class="report-stat"><span>主要分心活動</span> <span class="report-highlight" style="color:#9575cd;">${topDist}</span></div>
+            `;
+
+            const adviceBox = document.getElementById('reportAdvice');
+            let advice = "";
+            if (total > 15) advice += "本週逃避頻率稍高，建議將大任務切碎。<br><br>";
+            if (topDist.includes("Threads") || topDist.includes("YT") || topDist.includes("Discord")) advice += `偵測到你常滑 ${topDist}，建議設定 App 使用時間限制。<br><br>`;
+            else if (topDist.includes("玩")) advice += "玩遊戲是很好的放鬆，但記得設鬧鐘，不要玩過頭囉。<br><br>";
+            
+            advice += "接納自己的逃避，每一次的回歸都是一次勝利。";
+            adviceBox.innerHTML = `<strong>💡 AI 行動建議：</strong><br>${advice}`;
+            document.getElementById('reportModal').classList.add('active');
+        }
+
+        function renderStats(stamps) { /* 同前 */
+            if (stamps.length === 0) return;
+            const returnedList = stamps.filter(s => s.returned !== null && s.returned !== undefined);
+            const successCount = returnedList.filter(s => s.returned === true).length;
+            const rate = returnedList.length > 0 ? Math.round((successCount / returnedList.length) * 100) : 0;
+            document.getElementById('statReturnRate').innerText = rate + "%";
+            document.getElementById('statAvgIntensity').innerText = (stamps.reduce((sum, s) => sum + (parseInt(s.intensity)||3), 0) / stamps.length).toFixed(1);
+        }
+
+        // --- 3. 圖表渲染 (v8 新增 Distraction Chart) ---
+        function renderCharts(stamps) {
+            const hasData = stamps && stamps.length > 0;
+            if (!hasData) return;
+
+            // Chart 1: Task x Reason
+            const taskReasonCtx = document.getElementById('taskReasonChart').getContext('2d');
+            const matrix = {}; stamps.forEach(s => { const t = s.taskType||'未分類'; const r = s.reason||'不明'; if(!matrix[t]) matrix[t]={}; matrix[t][r]=(matrix[t][r]||0)+1; });
+            const taskLabels = Object.keys(matrix);
+            const reasonSet = new Set(); taskLabels.forEach(t => Object.keys(matrix[t]).forEach(r => reasonSet.add(r)));
+            const reasonLabels = Array.from(reasonSet);
+            const datasets = reasonLabels.map((r, i) => ({
+                label: r, data: taskLabels.map(t => matrix[t][r]||0),
+                backgroundColor: ['#ffb7c5', '#a8d8ea', '#c4a3bf', '#a8e6cf'][i%4], borderRadius: 4, stack: 's1'
+            }));
+
+            if (taskReasonChartInstance) taskReasonChartInstance.destroy();
+            taskReasonChartInstance = new Chart(taskReasonCtx, {
+                type: 'bar', data: { labels: taskLabels, datasets: datasets },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { stacked: true }, y: { stacked: true } },
+                    onClick: (e, elements) => { if (elements.length > 0) { const idx = elements[0].index; const datasetIdx = elements[0].datasetIndex; applyFilter({ task: taskLabels[idx], reason: datasets[datasetIdx].label }); } } }
+            });
+
+            // Chart 2: Distraction Chart (NEW)
+            const distCtx = document.getElementById('distractionChart').getContext('2d');
+            const distCounts = {};
+            stamps.forEach(s => {
+                if(s.distractions && s.distractions.length > 0) {
+                    s.distractions.forEach(d => distCounts[d] = (distCounts[d]||0)+1);
+                }
+            });
+            // Sort by count
+            const sortedDist = Object.entries(distCounts).sort((a,b) => b[1]-a[1]);
+            const distLabels = sortedDist.map(item => item[0]);
+            const distValues = sortedDist.map(item => item[1]);
+
+            if (distractionChartInstance) distractionChartInstance.destroy();
+            distractionChartInstance = new Chart(distCtx, {
+                type: 'bar',
+                data: { 
+                    labels: distLabels.length ? distLabels : ['尚無紀錄'], 
+                    datasets: [{ label: '次數', data: distValues.length ? distValues : [0], backgroundColor: '#b39ddb', borderRadius: 6 }] 
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: {stepSize: 1} } } }
+            });
+
+            // Chart 3: Daily Trend
+            const dailyCtx = document.getElementById('dailyTrendChart').getContext('2d');
+            const dateMap = {}; stamps.forEach(s => { const k = s.timestamp.slice(0,10); dateMap[k]=(dateMap[k]||0)+1; });
+            const sortedDates = Object.keys(dateMap).sort().slice(-7);
+            if (dailyTrendChartInstance) dailyTrendChartInstance.destroy();
+            dailyTrendChartInstance = new Chart(dailyCtx, {
+                type: 'line', data: { labels: sortedDates.map(d=>d.slice(5)), datasets: [{ label: '次數', data: sortedDates.map(d=>dateMap[d]), borderColor: '#ffb7c5', backgroundColor: 'rgba(255,183,197,0.3)', fill: true, tension: 0.3 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, onClick: (e, elements) => { if (elements.length > 0) applyFilter({ date: sortedDates[elements[0].index] }); } }
+            });
+
+            // Chart 4: Intensity
+            const intCtx = document.getElementById('intensityChart').getContext('2d');
+            const counts = [0,0,0,0,0]; stamps.forEach(s => { const v = parseInt(s.intensity||3); if(v>=1 && v<=5) counts[v-1]++; });
+            if (intensityChartInstance) intensityChartInstance.destroy();
+            intensityChartInstance = new Chart(intCtx, {
+                type: 'bar', data: { labels: ['1','2','3','4','5'], datasets: [{ data: counts, backgroundColor: '#a8e6cf', borderRadius: 4 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, onClick: (e, elements) => { if (elements.length > 0) applyFilter({ intensity: elements[0].index + 1 }); } }
+            });
+        }
+
+        function applyFilter(criteria) {
+            currentFilter = criteria;
+            const badge = document.getElementById('activeFilter');
+            const text = document.getElementById('filterText');
+            badge.style.display = 'inline-flex';
+            let desc = "";
+            if (criteria.task) desc += `任務: ${criteria.task} `;
+            if (criteria.reason) desc += `原因: ${criteria.reason} `;
+            if (criteria.date) desc += `日期: ${criteria.date} `;
+            if (criteria.intensity) desc += `強度: ${criteria.intensity} `;
+            text.innerText = desc;
+            renderLog(getData().stamps, currentFilter);
+            document.getElementById('activeFilter').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function clearFilter() {
+            currentFilter = null; document.getElementById('activeFilter').style.display = 'none';
+            renderLog(getData().stamps, null);
+        }
+
+        function renderLog(stamps, filter) {
+            const container = document.getElementById('logContainer'); container.innerHTML = '';
+            let filteredStamps = stamps.map((s, i) => ({...s, originalIndex: i})).reverse();
+            if (filter) {
+                filteredStamps = filteredStamps.filter(s => {
+                    let match = true;
+                    if (filter.task && s.taskType !== filter.task) match = false;
+                    if (filter.reason && s.reason !== filter.reason) match = false;
+                    if (filter.date && !s.timestamp.startsWith(filter.date)) match = false;
+                    if (filter.intensity && parseInt(s.intensity) !== filter.intensity) match = false;
+                    return match;
+                });
+            }
+
+            if (filteredStamps.length === 0) { container.innerHTML = '<div style="text-align:center; color:#ccc; padding:20px;">沒有符合篩選條件的紀錄</div>'; return; }
+
+            const grouped = {}; 
+            filteredStamps.forEach(s => {
+                const d = new Date(s.timestamp); const key = `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+                if (!grouped[key]) grouped[key] = []; grouped[key].push(s);
+            });
+
+            Object.keys(grouped).forEach((dateKey, idx) => {
+                const list = grouped[dateKey]; const details = document.createElement('details'); details.open = true;
+                const summary = document.createElement('summary'); summary.innerHTML = `<span>📅 ${dateKey}</span> <span style="font-weight:normal; font-size:0.85rem; color:#a890a8;">(${list.length}次)</span>`;
+                const div = document.createElement('div');
+                list.forEach(s => {
+                    const time = new Date(s.timestamp).toLocaleTimeString('zh-TW', {hour:'2-digit', minute:'2-digit'});
+                    const intensityDots = "●".repeat(s.intensity || 0);
+                    const returnIcon = s.returned === true ? "<span class='status-ok'>✅</span>" : s.returned === false ? "<span class='status-no'>⭕</span>" : "<span class='status-no'>❓</span>";
+                    
+                    // 生成分心標籤 HTML
+                    let distBadges = '';
+                    if (s.distractions && s.distractions.length > 0) {
+                        distBadges = s.distractions.map(d => `<span class="badge bg-distraction">${d}</span>`).join('');
+                    }
+
+                    const item = document.createElement('div'); item.className = 'log-item';
+                    item.innerHTML = `
+                        <div style="font-size:1.5rem; margin-right:10px;">${s.stampIcon||'🐢'}</div>
+                        <div class="log-meta">
+                            <div class="log-badges">
+                                <span class="badge bg-task">${s.taskType||'未知'}</span>
+                                <span class="badge bg-reason">${s.reason}</span>
+                                ${distBadges}
+                            </div>
+                            <div style="display:flex; justify-content:space-between; width:100%; margin-top:5px;">
+                                <span class="intensity-dots">${intensityDots}</span> <span style="font-size:0.8rem; color:#c4a3bf; font-weight:bold;">${time}</span>
+                            </div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:12px;">
+                            <div class="return-status">${returnIcon}</div>
+                            <button class="btn-delete-row" onclick="deleteSingleStamp(${s.originalIndex})">🗑️</button>
+                        </div>
+                    `;
+                    div.appendChild(item);
+                });
+                details.appendChild(summary); details.appendChild(div); container.appendChild(details);
+            });
+        }
+
+        // --- 功能函式 ---
+        function deleteSingleStamp(index) { if(confirm("確定要刪除這筆紀錄嗎？")) { const data = getData(); data.stamps.splice(index, 1); saveData(data); renderAll(); }}
+        
+        function openInputModal() { 
+            document.getElementById('inputModal').classList.add('active'); selectedTask=''; selectedReason=''; 
+            document.querySelectorAll('#inputModal .chip-btn').forEach(b=>b.classList.remove('selected')); 
+            document.getElementById('intensityRange').value=3; document.getElementById('intensityVal').innerText=3; document.getElementById('customInput').value=''; 
+        }
+        function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+        function selectTask(btn,val) { btn.parentElement.querySelectorAll('.chip-btn').forEach(b=>b.classList.remove('selected')); btn.classList.add('selected'); selectedTask=val; }
+        function selectReason(btn,val) { btn.parentElement.querySelectorAll('.chip-btn').forEach(b=>b.classList.remove('selected')); btn.classList.add('selected'); selectedReason=val; }
+        
+        // 複選功能
+        function toggleDistraction(btn, val) {
+            if (selectedDistractions.includes(val)) {
+                selectedDistractions = selectedDistractions.filter(item => item !== val);
+                btn.classList.remove('checked');
+            } else {
+                selectedDistractions.push(val);
+                btn.classList.add('checked');
+            }
+        }
+
+        function confirmStamp() {
+            const customInput = document.getElementById('customInput').value.trim(); const data = getData();
+            const intensityVal = parseInt(document.getElementById('intensityRange').value);
+            data.stamps.push({ 
+                timestamp: new Date().toISOString(), 
+                reason: customInput||selectedReason||"不明原因", 
+                taskType: selectedTask||"未分類", 
+                intensity: intensityVal, 
+                returned: null, 
+                stampIcon: pickStampByIntensity(intensityVal),
+                distractions: [] // 初始為空，等回來時填寫
+            });
+            saveData(data); closeModal('inputModal'); renderAll(); startTimer();
+        }
+        
+        function checkPendingReturn() {
+            const data = getData(); if(data.stamps.length===0) return;
+            const lastStamp = data.stamps[data.stamps.length-1];
+            // 距離上次紀錄 > 5 分鐘 且 尚未確認過
+            if(lastStamp.returned===null && (new Date()-new Date(lastStamp.timestamp))/60000 > 5) {
+                const d = new Date(lastStamp.timestamp); 
+                document.getElementById('lastTimeStr').innerText=`${d.getHours()}:${d.getMinutes().toString().padStart(2,'0')}`; 
+                
+                // 重置分心選項狀態
+                selectedDistractions = [];
+                renderDistractionOptions();
+                
+                document.getElementById('returnModal').classList.add('active');
+            }
+        }
+
+        function handleReturn(didReturn) { 
+            const data=getData(); 
+            const lastIdx=data.stamps.length-1; 
+            if(lastIdx>=0){ 
+                data.stamps[lastIdx].returned = didReturn; 
+                // 儲存選擇的分心行為
+                data.stamps[lastIdx].distractions = [...selectedDistractions];
+                saveData(data); 
+            } 
+            closeModal('returnModal'); renderAll(); 
+        }
+
+        function startTimer() { document.getElementById('timerModal').classList.add('active'); let sec=180; const dis=document.getElementById('timerDisplay'); if(countdownInterval) clearInterval(countdownInterval); const tick=()=>{ const m=Math.floor(sec/60).toString().padStart(2,'0'); const s=(sec%60).toString().padStart(2,'0'); dis.innerText=`${m}:${s}`; if(sec<=0){ clearInterval(countdownInterval); alert("休息結束！"); closeModal('timerModal'); } sec--; }; tick(); countdownInterval=setInterval(tick,1000); }
+        function stopTimer() { clearInterval(countdownInterval); closeModal('timerModal'); }
+        function resetAllData() { if(confirm("確定要清空所有紀錄重新開始嗎？")) { localStorage.removeItem('escape_v8_data'); location.reload(); } }
+
+        init();
+    </script>
+</body>
+</html>
